@@ -3,7 +3,7 @@
 * [Introduction](README.md)
 * [入门篇](CHAPTER1/README.md)
     * [初识CoreData](CHAPTER1/FirstLesson.md)
-    * [入门指南](CHAPTER1/Guide1.md)
+    * [入门指南](CHAPTER1/Guide.md)
     * [基础使用](CHAPTER1/BasicUsage.md)
 * [进阶篇](CHAPTER2/README.md)
     * [使用进阶](CHAPTER2/AdvancedUsage1.md)
