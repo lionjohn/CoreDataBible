@@ -9,10 +9,10 @@
 * [进阶篇](CHAPTER2/README.md)
     * [使用进阶](CHAPTER2/AdvancedUsage1.md)
     * [高级用法](CHAPTER2/AdvancedUsage2.md)
-    * [多线程](CHAPTER3/MultiThread.md)
+    * [多线程](CHAPTER2/MultiThread.md)
 * [高级篇](CHAPTER3/README.md)
     * [版本管理](CHAPTER3/VersionManagement.md)
-    * [数据迁移](CHAPTER3/MultiThread.md)
+    * [Core Data数据迁移指南](CHAPTER3/CoreDataMigration.md)
     * [MagicalRecord](CHAPTER3/MagicalRecord.md)
     * [其他数据库](CHAPTER1/OtherDatabase.md)
 
