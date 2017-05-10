@@ -469,3 +469,119 @@ if (error) {
 
 ![认识CoreData—使用进阶](media/1470038572973161.png "1470038572973161.png")
 
+从执行结果可以看到，`MOC`对所有查找到的托管对象`height`属性执行了求和操作，并**将结果放在字典中**返回。位运算主要是通过`NSFetchRequest`对象的`propertiesToFetch`属性设置，这个属性可以设置多个描述对象，最后通过不同的`name`当做`key`来取出结果即可。
+
+`NSExpression`类可以描述多种运算，可以在`NSExpression.h`文件中的注释部分，看到所有支持的运算类型，大概看了一下有二十多种运算。而且除了上面`NSExpression`调用的方法，此类还支持**点语法**的位运算，例如下面的例子。
+
+```
+[NSExpression expressionWithFormat:@"@sum.height"];
+```
+
+### 批处理
+
+在使用`CoreData`之前，我和公司同事也讨论过，假设遇到需要**大量数据处理**的时候怎么办。`CoreData`对于大量数据处理的灵活性肯定不如`SQLite`，这时候还需要自己使用其他方式优化数据处理。**虽然在移动端这种情况很少出现**，但是在持久层设计时还是要考虑这方面。
+
+当需要进行数据的处理时，`CoreData`需要先将数据**加载到内存中**，然后才能对数据进行处理。这样对于大量数据来说，都加载到内存中是非常消耗内存的，而且容易导致崩溃的发生。如果遇到**更改所有数据的某个字段**这样的简单需求，需要将相关的托管对象都加载到内存中，然后进行更改、保存。
+
+对于上面这样的问题，`CoreData`在`iOS8`推出了**批量更新API**，通过这个`API`可以直接在**数据库一层**就完成更新操作，而**不需要将数据加载到内存**。除了批量更新操作，在`iOS9`中还推出了**批量删除API**，也是在数据库一层完成的操作。关于批处理的`API`很多都是`iOS8`、`iOS9`出来的，使用时**需要注意版本兼容**。
+
+但是有个问题，批量更新和批量删除的两个`API`，都是**直接对数据库进行操作**，更新完之后会导致`MOC`缓存和本地持久化**数据不同步**的问题。所以**需要手动刷新受影响的MOC中存储的托管对象**，使`MOC`和本地统一。假设你使用了`NSFetchedResultsController`，为了保证界面和数据的统一，这一步更新操作更需要做。
+
+#### 批量更新
+
+```
+// 创建批量更新对象，并指明操作Employee表。
+NSBatchUpdateRequest *updateRequest = [NSBatchUpdateRequest batchUpdateRequestWithEntityName:@"Employee"];
+// 设置返回值类型，默认是什么都不返回(NSStatusOnlyResultType)，这里设置返回发生改变的对象Count值
+updateRequest.resultType = NSUpdatedObjectsCountResultType;
+// 设置发生改变字段的字典
+updateRequest.propertiesToUpdate = @{@"height" : [NSNumber numberWithFloat:5.f]};
+
+// 执行请求后，返回值是一个特定的result对象，通过result的属性获取返回的结果。MOC的这个API是从iOS8出来的，所以需要注意版本兼容。
+NSError *error = nil;
+NSBatchUpdateResult *result = [context executeRequest:updateRequest error:&error];
+NSLog(@"batch update count is %ld", [result.result integerValue]);
+
+// 错误处理
+if (error) {
+    NSLog(@"batch update request result error : %@", error);
+}
+
+// 更新MOC中的托管对象，使MOC和本地持久化区数据同步
+[context refreshAllObjects];
+```
+
+上面对`Employee`表中所有的托管对象`height`值做了批量更新，在更新时通过设置`propertiesToUpdate`字典来控制更新字段和更新的值，设置格式是`字段名 : 新值`。通过设置批处理对象的`predicate`属性，设置一个谓词对象来**控制受影响的对象**。
+
+还可以对多个存储区(数据库)做同样批处理操作，通过设置**其父类**的`affectedStores`属性，类型是一个数组，可以包含受影响的存储区，多个存储区的操作**对批量删除同样适用**。
+
+`MOC`在执行请求方法时，发现方法名也不一样了，执行的是`executeRequest: error:`方法，这个方法是从`iOS8`之后出来的。方法传入的参数是`NSBatchUpdateRequest`类，此类并不是继承自`NSFetchRequest`类，而是直接继承自`NSPersistentStoreRequest`，和`NSFetchRequest`是平级关系。
+
+#### 批量删除
+
+```
+// 创建请求对象，并指明对Employee表做操作
+NSFetchRequest *fetchRequest = [NSFetchRequest fetchRequestWithEntityName:@"Employee"];
+// 通过谓词设置过滤条件，设置条件为height小于1.7
+NSPredicate *predicate = [NSPredicate predicateWithFormat:@"height < %f", 1.7f];
+fetchRequest.predicate = predicate;
+
+// 创建批量删除请求，并使用上面创建的请求对象当做参数进行初始化
+NSBatchDeleteRequest *deleteRequest = [[NSBatchDeleteRequest alloc] initWithFetchRequest:fetchRequest];
+// 设置请求结果类型，设置为受影响对象的Count
+deleteRequest.resultType = NSBatchDeleteResultTypeCount;
+
+// 使用NSBatchDeleteResult对象来接受返回结果，通过id类型的属性result获取结果
+NSError *error = nil;
+NSBatchDeleteResult *result = [context executeRequest:deleteRequest error:&error];
+NSLog(@"batch delete request result count is %ld", [result.result integerValue]);
+
+// 错误处理
+if (error) {
+    NSLog(@"batch delete request error : %@", error);
+}
+
+// 更新MOC中的托管对象，使MOC和本地持久化区数据同步
+[context refreshAllObjects];
+```
+
+大多数情况下，涉及到托管对象的操作，都需要将其加载到内存中完成。所以使用`CoreData`时，需要注意内存的使用，**不要在内存中存在过多的托管对象**。在已经做系统兼容的情况下，进行大量数据的操作时，应该**尽量使用批处理**来完成操作。
+
+需要注意的是，`refreshAllObjects`是从`iOS9`出来的，在`iOS9`之前因为要做版本兼容，所以需要使用`refreshObject: mergeChanges:`方法更新托管对象。
+
+### 异步请求
+
+```
+// 创建请求对象，并指明操作Employee表
+NSFetchRequest *fetchRequest = [NSFetchRequest fetchRequestWithEntityName:@"Employee"];
+
+// 创建异步请求对象，并通过一个block进行回调，返回结果是一个NSAsynchronousFetchResult类型参数
+NSAsynchronousFetchRequest *asycFetchRequest = [[NSAsynchronousFetchRequest alloc] initWithFetchRequest:fetchRequest completionBlock:^(NSAsynchronousFetchResult * _Nonnull result) {
+
+    [result.finalResult enumerateObjectsUsingBlock:^(Employee * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+        NSLog(@"fetch request result Employee.count = %ld, Employee.name = %@", result.finalResult.count, obj.name);
+    }];
+}];
+
+// 执行异步请求，和批量处理执行同一个请求方法
+NSError *error = nil;
+[context executeRequest:asycFetchRequest error:&error];
+
+// 错误处理
+if (error) {
+    NSLog(@"fetch request result error : %@", error);
+}
+```
+
+上面通过`NSAsynchronousFetchRequest`对象创建了一个异步请求，并通过`block`进行回调。如果**有多个请求同时发起**，**不需要担心线程安全的问题**，系统会将所有的异步请求**添加到一个操作队列中**，在前一个任务访问数据库时，`CoreData`会将数据库加锁，等前面的执行完成才会继续执行后面的操作。
+
+`NSAsynchronousFetchRequest`提供了`cancel`方法，也就是可以在请求过程中，将这个请求取消。还可以通过一个`NSProgress`类型的属性，获取请求完成进度。`NSAsynchronousFetchRequest`类从`iOS8`开始可以使用，所以低版本需要做版本兼容。
+
+需要注意的是，执行请求时`MOC`并发类型不能是`NSConfinementConcurrencyType`，这个并发类型已经被抛弃，会导致崩溃。
+
+* * *
+
+好多同学都问我有`Demo`没有，其实文章中贴出的代码组合起来就是个`Demo`。后来想了想，还是给本系列文章配了一个简单的`Demo`，方便大家运行调试，后续会给所有博客的文章都加上`Demo`。
+
+`Demo`只是来辅助读者更好的理解文章中的内容，**应该博客结合`Demo`一起学习，只看`Demo`还是不能理解更深层的原理**。`Demo`中几乎每一行代码都会有注释，各位可以打断点跟着`Demo`执行流程走一遍，看看各个阶段变量的值。
+
